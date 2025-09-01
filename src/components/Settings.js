@@ -1,16 +1,53 @@
 import React from 'react';
+import { X } from 'lucide-react';
 
-const Settings = ({
-  settings,
-  setSettings,
-  setShowSettings
-}) => {
-  const questionTypes = [
-    { id: 'translation', name: 'Spanish → English', icon: '🇪🇸➡️🇺🇸' },
-    { id: 'reverse', name: 'English → Spanish', icon: '🇺🇸➡️🇪🇸' },
-    { id: 'multiple', name: 'Multiple Choice', icon: '📝' },
-    { id: 'fillblank', name: 'Fill in the Blank', icon: '✏️' },
-    { id: 'pronunciation', name: 'Pronunciation', icon: '🔊' }
+const Settings = ({ settings, setSettings, setShowSettings }) => {
+  // Provide default settings structure if undefined
+  const safeSettings = {
+    masteryThreshold: 0.8,
+    spacedRepetitionEnabled: true,
+    reviewInterval: 24,
+    difficultyAdjustment: true,
+    maxReviewsPerSession: 50,
+    questionTypes: ['translation', 'multipleChoice', 'fillBlank'],
+    enabledQuestionTypes: ['translation', 'multipleChoice', 'fillBlank'],
+    enablePronunciation: true,
+    enableHints: true,
+    sessionGoal: 20,
+    streakBonus: true,
+    ...settings // Merge with actual settings if they exist
+  };
+
+  const handleSettingChange = (key, value) => {
+    const newSettings = { ...safeSettings, [key]: value };
+    setSettings(newSettings);
+  };
+
+  const handleQuestionTypeToggle = (questionType) => {
+    const currentTypes = safeSettings.enabledQuestionTypes || [];
+    let newTypes;
+    
+    if (currentTypes.includes(questionType)) {
+      // Remove the question type
+      newTypes = currentTypes.filter(type => type !== questionType);
+    } else {
+      // Add the question type
+      newTypes = [...currentTypes, questionType];
+    }
+    
+    // Ensure at least one question type is enabled
+    if (newTypes.length === 0) {
+      newTypes = ['translation']; // Default fallback
+    }
+    
+    handleSettingChange('enabledQuestionTypes', newTypes);
+  };
+
+  const questionTypeOptions = [
+    { id: 'translation', label: 'Translation', description: 'Translate words between Spanish and English' },
+    { id: 'multipleChoice', label: 'Multiple Choice', description: 'Choose the correct translation from options' },
+    { id: 'fillBlank', label: 'Fill in the Blank', description: 'Complete sentences with missing words' },
+    { id: 'pronunciation', label: 'Pronunciation', description: 'Listen and type what you hear' }
   ];
 
   return (
@@ -20,107 +57,199 @@ const Settings = ({
           <h3 className="text-2xl font-bold text-gray-800">Learning Settings</h3>
           <button
             onClick={() => setShowSettings(false)}
-            className="text-gray-500 hover:text-gray-700"
+            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
           >
-            ✕
+            <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
 
         <div className="space-y-6">
-          {/* Question Type Preferences */}
-          <div>
-            <h4 className="text-lg font-semibold mb-3">Question Types</h4>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {questionTypes.map(type => (
-                <label key={type.id} className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
+          {/* Mastery Settings */}
+          <div className="bg-blue-50 p-4 rounded-lg">
+            <h4 className="text-lg font-semibold mb-4 text-blue-800">Mastery & Progress</h4>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Mastery Threshold: {Math.round(safeSettings.masteryThreshold * 100)}%
+                </label>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="1"
+                  step="0.1"
+                  value={safeSettings.masteryThreshold}
+                  onChange={(e) => handleSettingChange('masteryThreshold', parseFloat(e.target.value))}
+                  className="w-full"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Words need this accuracy percentage to be considered mastered
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Session Goal: {safeSettings.sessionGoal} words
+                </label>
+                <input
+                  type="range"
+                  min="5"
+                  max="50"
+                  step="5"
+                  value={safeSettings.sessionGoal}
+                  onChange={(e) => handleSettingChange('sessionGoal', parseInt(e.target.value))}
+                  className="w-full"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Spaced Repetition Settings */}
+          <div className="bg-green-50 p-4 rounded-lg">
+            <h4 className="text-lg font-semibold mb-4 text-green-800">Spaced Repetition</h4>
+            
+            <div className="space-y-4">
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={safeSettings.spacedRepetitionEnabled}
+                  onChange={(e) => handleSettingChange('spacedRepetitionEnabled', e.target.checked)}
+                  className="rounded text-green-600"
+                />
+                <span className="ml-2">Enable Spaced Repetition</span>
+              </label>
+
+              {safeSettings.spacedRepetitionEnabled && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Base Review Interval: {safeSettings.reviewInterval} hours
+                  </label>
+                  <input
+                    type="range"
+                    min="1"
+                    max="72"
+                    step="1"
+                    value={safeSettings.reviewInterval}
+                    onChange={(e) => handleSettingChange('reviewInterval', parseInt(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Max Reviews per Session: {safeSettings.maxReviewsPerSession}
+                </label>
+                <input
+                  type="range"
+                  min="10"
+                  max="100"
+                  step="10"
+                  value={safeSettings.maxReviewsPerSession}
+                  onChange={(e) => handleSettingChange('maxReviewsPerSession', parseInt(e.target.value))}
+                  className="w-full"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Question Types */}
+          <div className="bg-purple-50 p-4 rounded-lg">
+            <h4 className="text-lg font-semibold mb-4 text-purple-800">Question Types</h4>
+            
+            <div className="space-y-3">
+              {questionTypeOptions.map(option => (
+                <label key={option.id} className="flex items-start gap-3 p-3 bg-white rounded-lg border cursor-pointer hover:bg-gray-50">
                   <input
                     type="checkbox"
-                    checked={settings.questionTypes.includes(type.id)}
-                    onChange={(e) => {
-                      const newTypes = e.target.checked
-                        ? [...settings.questionTypes, type.id]
-                        : settings.questionTypes.filter(t => t !== type.id);
-                      setSettings({ ...settings, questionTypes: newTypes });
-                    }}
-                    className="rounded text-blue-600"
+                    checked={safeSettings.enabledQuestionTypes?.includes(option.id) || false}
+                    onChange={() => handleQuestionTypeToggle(option.id)}
+                    className="mt-1 rounded text-purple-600"
                   />
-                  <span className="text-sm">{type.icon} {type.name}</span>
+                  <div>
+                    <div className="font-medium">{option.label}</div>
+                    <div className="text-sm text-gray-500">{option.description}</div>
+                  </div>
                 </label>
               ))}
             </div>
           </div>
 
-          {/* Spaced Repetition */}
-          <div>
-            <h4 className="text-lg font-semibold mb-3">Spaced Repetition</h4>
-            <label className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-              <input
-                type="checkbox"
-                checked={settings.spacedRepetitionEnabled}
-                onChange={(e) => setSettings({ ...settings, spacedRepetitionEnabled: e.target.checked })}
-                className="rounded text-blue-600"
-              />
-              <div>
-                <div className="font-medium">Enable Spaced Repetition</div>
-                <div className="text-sm text-gray-600">Optimize review timing based on memory retention</div>
-              </div>
-            </label>
-          </div>
-
-          {/* Pronunciation Hints */}
-          <div>
-            <h4 className="text-lg font-semibold mb-3">Pronunciation</h4>
-            <label className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-              <input
-                type="checkbox"
-                checked={settings.pronunciationHints}
-                onChange={(e) => setSettings({ ...settings, pronunciationHints: e.target.checked })}
-                className="rounded text-blue-600"
-              />
-              <div>
-                <div className="font-medium">Show Pronunciation Hints</div>
-                <div className="text-sm text-gray-600">Display phonetic pronunciation guides</div>
-              </div>
-            </label>
-          </div>
-
-          {/* Difficulty Settings */}
-          <div>
-            <h4 className="text-lg font-semibold mb-3">Difficulty</h4>
+          {/* Learning Features */}
+          <div className="bg-yellow-50 p-4 rounded-lg">
+            <h4 className="text-lg font-semibold mb-4 text-yellow-800">Learning Features</h4>
+            
             <div className="space-y-3">
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <label className="block font-medium mb-2">Mastery Threshold</label>
+              <label className="flex items-center justify-between">
+                <span>Adaptive Difficulty</span>
                 <input
-                  type="range"
-                  min="0.7"
-                  max="1.0"
-                  step="0.05"
-                  value={settings.masteryThreshold}
-                  onChange={(e) => setSettings({ ...settings, masteryThreshold: parseFloat(e.target.value) })}
-                  className="w-full"
+                  type="checkbox"
+                  checked={safeSettings.difficultyAdjustment}
+                  onChange={(e) => handleSettingChange('difficultyAdjustment', e.target.checked)}
+                  className="rounded text-yellow-600"
                 />
-                <div className="text-sm text-gray-600 mt-1">
-                  Consider words mastered at {(settings.masteryThreshold * 100).toFixed(0)}% proficiency
-                </div>
-              </div>
+              </label>
+
+              <label className="flex items-center justify-between">
+                <span>Pronunciation Practice</span>
+                <input
+                  type="checkbox"
+                  checked={safeSettings.enablePronunciation}
+                  onChange={(e) => handleSettingChange('enablePronunciation', e.target.checked)}
+                  className="rounded text-yellow-600"
+                />
+              </label>
+
+              <label className="flex items-center justify-between">
+                <span>Hints Available</span>
+                <input
+                  type="checkbox"
+                  checked={safeSettings.enableHints}
+                  onChange={(e) => handleSettingChange('enableHints', e.target.checked)}
+                  className="rounded text-yellow-600"
+                />
+              </label>
+
+              <label className="flex items-center justify-between">
+                <span>Streak Bonus Points</span>
+                <input
+                  type="checkbox"
+                  checked={safeSettings.streakBonus}
+                  onChange={(e) => handleSettingChange('streakBonus', e.target.checked)}
+                  className="rounded text-yellow-600"
+                />
+              </label>
             </div>
           </div>
+        </div>
 
-          {/* Reset Progress */}
-          <div>
-            <h4 className="text-lg font-semibold mb-3 text-red-600">Danger Zone</h4>
-            <button
-              onClick={() => {
-                if (window.confirm('Are you sure you want to reset all progress? This cannot be undone.')) {
-                  localStorage.clear();
-                  window.location.reload();
-                }
-              }}
-              className="w-full p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg hover:bg-red-100 transition-colors"
-            >
-              Reset All Progress
-            </button>
-          </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            onClick={() => setShowSettings(false)}
+            className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg transition-colors"
+          >
+            Close
+          </button>
+          <button
+            onClick={() => {
+              // Reset to defaults
+              setSettings({
+                masteryThreshold: 0.8,
+                spacedRepetitionEnabled: true,
+                reviewInterval: 24,
+                difficultyAdjustment: true,
+                maxReviewsPerSession: 50,
+                enabledQuestionTypes: ['translation', 'multipleChoice', 'fillBlank'],
+                enablePronunciation: true,
+                enableHints: true,
+                sessionGoal: 20,
+                streakBonus: true
+              });
+            }}
+            className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors"
+          >
+            Reset to Defaults
+          </button>
         </div>
       </div>
     </div>
