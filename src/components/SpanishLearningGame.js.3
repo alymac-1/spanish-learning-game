@@ -1,0 +1,416 @@
+import React, { useState, useEffect } from 'react';
+import LevelSelection from './LevelSelection';
+import GameInterface from './GameInterface';
+import AnalyticsModal from './AnalyticsModal';
+import SettingsModal from './SettingsModal';
+import RandomConfigModal from './RandomConfigModal';
+import { useWordStats } from '../hooks/useWordStats';
+import { useSessionStats } from '../hooks/useSessionStats';
+import { normalizeInput } from '../utils/inputNormalization';
+import { speakSpanish, handleStopPronunciation } from '../utils/speechUtils';
+import { calculateSM2 } from '../utils/sm2Algorithm';
+import { getOptimalWord, selectOptimalQuestionType } from '../utils/wordSelection';
+import { generateMultipleChoiceOptions, generateFillBlankSentence } from '../utils/questionGeneration';
+import { levels, questionTypes } from '../data/words';
+
+const SpanishLearningGame = () => {
+  const [selectedLevel, setSelectedLevel] = useState(null);
+  const [selectedTopic, setSelectedTopic] = useState(null);
+  const [isRandomMode, setIsRandomMode] = useState(false);
+  const [currentWord, setCurrentWord] = useState(null);
+  const [questionType, setQuestionType] = useState('translation');
+  const [userAnswer, setUserAnswer] = useState('');
+  const [selectedChoice, setSelectedChoice] = useState('');
+  const [score, setScore] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [feedback, setFeedback] = useState(null);
+  const [wordsCompleted, setWordsCompleted] = useState(0);
+  const [gameStarted, setGameStarted] = useState(false);
+  const [hintsEnabled, setHintsEnabled] = useState(true);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showRandomConfig, setShowRandomConfig] = useState(false);
+  const [selectedLevelsForRandom, setSelectedLevelsForRandom] = useState({
+    A1: true,
+    A2: true,
+    B1: true,
+    B2: true
+  });
+  
+  const [wordStats, initializeWordPool, updateWordStats] = useWordStats();
+  const [sessionStats, updateSessionStats, resetSessionStats] = useSessionStats();
+  const [availableWords, setAvailableWords] = useState([]);
+  const [multipleChoiceOptions, setMultipleChoiceOptions] = useState([]);
+  const [fillBlankSentence, setFillBlankSentence] = useState('');
+  const [fillBlankAnswer, setFillBlankAnswer] = useState('');
+  const [questionStartTime, setQuestionStartTime] = useState(null);
+  
+  // Advanced Settings
+  const [settings, setSettings] = useState({
+    spacedRepetitionEnabled: true,
+    adaptiveDifficulty: true,
+    pronunciationHints: true,
+    contextualLearning: true,
+    masteryThreshold: 0.85,
+    reviewInterval: 'optimal',
+    questionTypeWeights: {
+      translation: 1,
+      reverse: 1,
+      multiple: 1,
+      fillblank: 1,
+      pronunciation: 1
+    }
+  });
+
+  const handlePlayPronunciation = () => {
+    if (!currentWord?.spanish) return;
+    try {
+      speakSpanish(currentWord.spanish, { rate: 0.95, pitch: 1.0 });
+    } catch (e) {
+      console.warn(e.message);
+      alert("Text-to-speech not supported in this browser.");
+    }
+  };
+
+  const checkAnswer = () => {
+    if (!currentWord || !questionStartTime) return;
+    
+    const responseTime = Date.now() - questionStartTime;
+    let isCorrect = false;
+    let userInput = '';
+    let quality = 0; // SM2 quality rating (0-5)
+    
+    switch (questionType) {
+      case 'translation':
+        userInput = normalizeInput(userAnswer.toLowerCase().trim());
+        isCorrect = userInput === currentWord.english.toLowerCase();
+        break;
+      case 'reverse':
+        userInput = userAnswer.toLowerCase().trim();
+        isCorrect = userInput === currentWord.spanish.toLowerCase();
+        break;
+      case 'multiple':
+        userInput = selectedChoice;
+        isCorrect = selectedChoice === currentWord.english;
+        break;
+      case 'fillblank':
+        userInput = userAnswer.toLowerCase().trim();
+        isCorrect = userInput === fillBlankAnswer.toLowerCase();
+        break;
+      case 'pronunciation':
+        // For demo purposes, assume correct if any answer is given
+        isCorrect = userAnswer.trim().length > 0;
+        break;
+    }
+    
+    // Calculate SM2 quality based on correctness and response time
+    if (isCorrect) {
+      if (responseTime < 3000) quality = 5; // Perfect
+      else if (responseTime < 6000) quality = 4; // Good
+      else quality = 3; // Acceptable
+    } else {
+      quality = responseTime < 10000 ? 1 : 0; // Poor or very poor
+    }
+    
+    const key = `${currentWord.spanish}-${currentWord.english}`;
+    
+    // Update enhanced word statistics
+    const newStats = new Map(wordStats);
+    const stat = newStats.get(key);
+    
+    if (stat) {
+      // Update SM2 parameters
+      const sm2Result = calculateSM2(quality, stat.easiness, stat.interval, stat.repetitions);
+      stat.easiness = sm2Result.easiness;
+      stat.interval = sm2Result.interval;
+      stat.repetitions = sm2Result.repetitions;
+      stat.nextReview = Date.now() + (stat.interval * 24 * 60 * 60 * 1000);
+      
+      // Update general statistics
+      stat.timesShown++;
+      if (isCorrect) stat.timesCorrect++;
+      
+      // Update question type statistics
+      const typeStats = stat.questionTypeStats[questionType];
+      typeStats.total++;
+      if (isCorrect) typeStats.correct++;
+      typeStats.avgTime = ((typeStats.avgTime * (typeStats.total - 1)) + responseTime) / typeStats.total;
+      
+      // Update mastery level (0-1 scale)
+      const accuracy = stat.timesCorrect / stat.timesShown;
+      const speedFactor = Math.max(0.5, Math.min(1, 5000 / responseTime));
+      stat.masteryLevel = Math.min(1, accuracy * speedFactor * 0.9 + stat.masteryLevel * 0.1);
+      
+      // Update learning history
+      stat.learningHistory.push({
+        timestamp: Date.now(),
+        questionType,
+        correct: isCorrect,
+        responseTime,
+        quality
+      });
+      
+      // Keep only recent history
+      if (stat.learningHistory.length > 20) {
+        stat.learningHistory = stat.learningHistory.slice(-20);
+      }
+      
+      if (isCorrect) stat.lastCorrect = Date.now();
+      
+      newStats.set(key, stat);
+      updateWordStats(newStats);
+    }
+    
+    // Update session statistics
+    updateSessionStats({
+      questionsAnswered: sessionStats.questionsAnswered + 1,
+      correctAnswers: sessionStats.correctAnswers + (isCorrect ? 1 : 0),
+      streakRecord: Math.max(sessionStats.streakRecord, streak + (isCorrect ? 1 : 0)),
+      difficultWords: isCorrect ? sessionStats.difficultWords : [...sessionStats.difficultWords.filter(w => w !== key), key].slice(-10)
+    });
+    
+    // Update score and streak
+    if (isCorrect) {
+      const basePoints = questionType === 'multiple' ? 5 : 10;
+      const speedBonus = responseTime < 3000 ? 5 : 0;
+      const difficultyBonus = (stat?.difficultyRating || 1) * 2;
+      setScore(score + basePoints + streak * 2 + speedBonus + difficultyBonus);
+      setStreak(streak + 1);
+      setFeedback({ 
+        type: 'correct', 
+        message: 'Correct!', 
+        details: `+${basePoints + streak * 2 + speedBonus + difficultyBonus} points (${responseTime}ms)` 
+      });
+    } else {
+      setStreak(0);
+      let correctAnswer = '';
+      switch (questionType) {
+        case 'translation':
+          correctAnswer = currentWord.english;
+          break;
+        case 'reverse':
+          correctAnswer = currentWord.spanish;
+          break;
+        case 'multiple':
+          correctAnswer = currentWord.english;
+          break;
+        case 'fillblank':
+          correctAnswer = fillBlankAnswer;
+          break;
+        case 'pronunciation':
+          correctAnswer = currentWord.pronunciation || currentWord.spanish;
+          break;
+      }
+      setFeedback({ 
+        type: 'incorrect', 
+        message: `The answer is "${correctAnswer}"`,
+        details: `Response time: ${responseTime}ms`
+      });
+    }
+    
+    setWordsCompleted(wordsCompleted + 1);
+    
+    setTimeout(() => {
+      generateNextQuestion();
+      setFeedback(null);
+    }, 2500);
+  };
+
+  const generateNextQuestion = () => {
+    const word = getOptimalWord(availableWords, wordStats, settings);
+    if (!word) return;
+    
+    const key = `${word.spanish}-${word.english}`;
+    const selectedQuestionType = selectOptimalQuestionType(key, wordStats, settings, questionTypes);
+    
+    setCurrentWord(word);
+    setQuestionType(selectedQuestionType);
+    setUserAnswer('');
+    setSelectedChoice('');
+    setQuestionStartTime(Date.now());
+    
+    // Setup question-specific data
+    if (selectedQuestionType === 'multiple') {
+      setMultipleChoiceOptions(generateMultipleChoiceOptions(word, availableWords));
+    } else if (selectedQuestionType === 'fillblank') {
+      const fillBlankData = generateFillBlankSentence(word);
+      setFillBlankSentence(fillBlankData.sentence);
+      setFillBlankAnswer(fillBlankData.answer);
+    }
+    
+    // Update last seen counter for spaced repetition
+    const newStats = new Map(wordStats);
+    newStats.forEach((stat, statKey) => {
+      if (statKey === key) {
+        stat.lastSeen = Date.now();
+      }
+    });
+    updateWordStats(newStats);
+  };
+
+  const getRandomModeWordCount = () => {
+    let totalWords = 0;
+    Object.entries(levels).forEach(([levelKey, levelData]) => {
+      if (selectedLevelsForRandom[levelKey]) {
+        Object.values(levelData.topics).forEach(topicWords => {
+          totalWords += topicWords.length;
+        });
+      }
+    });
+    return totalWords;
+  };
+
+  const startRandomMode = () => {
+    const selectedLevelCount = Object.values(selectedLevelsForRandom).filter(Boolean).length;
+    if (selectedLevelCount === 0) {
+      alert('Please select at least one level for random mode.');
+      return;
+    }
+    setShowRandomConfig(false);
+    startGame('ALL', 'ALL', true);
+  };
+
+  const startGame = (level, topic, randomMode = false) => {
+    setSelectedLevel(level);
+    setSelectedTopic(topic);
+    setIsRandomMode(randomMode);
+    setGameStarted(true);
+    setScore(0);
+    setStreak(0);
+    setWordsCompleted(0);
+    setFeedback(null);
+    resetSessionStats();
+    updateSessionStats({ startTime: Date.now() });
+    
+    initializeWordPool(level, topic, randomMode, selectedLevelsForRandom, levels);
+  };
+
+  const resetGame = () => {
+    setSelectedLevel(null);
+    setSelectedTopic(null);
+    setIsRandomMode(false);
+    setGameStarted(false);
+    setCurrentWord(null);
+    setUserAnswer('');
+    setSelectedChoice('');
+    setScore(0);
+    setStreak(0);
+    setWordsCompleted(0);
+    setFeedback(null);
+    setShowAnalytics(false);
+    setShowSettings(false);
+    setShowRandomConfig(false);
+  };
+
+  useEffect(() => {
+    if (availableWords.length > 0 && !currentWord && gameStarted) {
+      generateNextQuestion();
+    }
+  }, [availableWords, gameStarted]);
+
+  useEffect(() => {
+    if (currentWord && gameStarted && questionType !== 'multiple') {
+      const input = document.querySelector('input[type="text"]');
+      if (input) setTimeout(() => input.focus(), 100);
+    }
+  }, [currentWord, gameStarted, questionType]);
+
+  // Analytics calculations
+  const getAnalyticsData = () => {
+    const totalWords = wordStats.size;
+    const masteredWords = Array.from(wordStats.values()).filter(stat => stat.masteryLevel >= settings.masteryThreshold).length;
+    const averageAccuracy = sessionStats.questionsAnswered > 0 ? (sessionStats.correctAnswers / sessionStats.questionsAnswered) * 100 : 0;
+    const sessionTime = sessionStats.startTime ? (Date.now() - sessionStats.startTime) / 1000 / 60 : 0;
+    
+    return {
+      totalWords,
+      masteredWords,
+      averageAccuracy,
+      sessionTime,
+      wordsPerMinute: sessionTime > 0 ? wordsCompleted / sessionTime : 0
+    };
+  };
+
+  return (
+    <>
+      {!gameStarted ? (
+        <LevelSelection 
+          levels={levels}
+          hintsEnabled={hintsEnabled}
+          setHintsEnabled={setHintsEnabled}
+          setShowRandomConfig={setShowRandomConfig}
+          setShowSettings={setShowSettings}
+          startGame={startGame}
+        />
+      ) : (
+        <GameInterface 
+          selectedLevel={selectedLevel}
+          selectedTopic={selectedTopic}
+          isRandomMode={isRandomMode}
+          currentWord={currentWord}
+          questionType={questionType}
+          userAnswer={userAnswer}
+          setUserAnswer={setUserAnswer}
+          selectedChoice={selectedChoice}
+          setSelectedChoice={setSelectedChoice}
+          score={score}
+          streak={streak}
+          feedback={feedback}
+          wordsCompleted={wordsCompleted}
+          hintsEnabled={hintsEnabled}
+          setHintsEnabled={setHintsEnabled}
+          showAnalytics={showAnalytics}
+          setShowAnalytics={setShowAnalytics}
+          showSettings={showSettings}
+          setShowSettings={setShowSettings}
+          wordStats={wordStats}
+          sessionStats={sessionStats}
+          settings={settings}
+          multipleChoiceOptions={multipleChoiceOptions}
+          fillBlankSentence={fillBlankSentence}
+          fillBlankAnswer={fillBlankAnswer}
+          checkAnswer={checkAnswer}
+          handlePlayPronunciation={handlePlayPronunciation}
+          handleStopPronunciation={handleStopPronunciation}
+          resetGame={resetGame}
+          getAnalyticsData={getAnalyticsData}
+          selectedLevelsForRandom={selectedLevelsForRandom}
+          questionTypes={questionTypes}
+          levels={levels}
+        />
+      )}
+      
+      {showRandomConfig && (
+        <RandomConfigModal 
+          levels={levels}
+          selectedLevelsForRandom={selectedLevelsForRandom}
+          setSelectedLevelsForRandom={setSelectedLevelsForRandom}
+          setShowRandomConfig={setShowRandomConfig}
+          startRandomMode={startRandomMode}
+          getRandomModeWordCount={getRandomModeWordCount}
+        />
+      )}
+      
+      {showAnalytics && (
+        <AnalyticsModal 
+          wordStats={wordStats}
+          sessionStats={sessionStats}
+          settings={settings}
+          setShowAnalytics={setShowAnalytics}
+          getAnalyticsData={getAnalyticsData}
+        />
+      )}
+      
+      {showSettings && (
+        <SettingsModal 
+          settings={settings}
+          setSettings={setSettings}
+          questionTypes={questionTypes}
+          setShowSettings={setShowSettings}
+        />
+      )}
+    </>
+  );
+};
+
+export default SpanishLearningGame;
